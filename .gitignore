@@ -1,0 +1,9 @@
+.vscode/*
+__pycache__/
+*.log
+t.ipynb
+*.pt
+*.pth
+checkpoints/*
+!checkpoints/.gitkeep
+.ipynb_checkpoints/*
