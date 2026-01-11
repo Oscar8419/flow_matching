@@ -2,6 +2,7 @@
 __pycache__/
 *.log
 t.ipynb
+t*.ipynb
 *.pt
 *.pth
 checkpoints/*

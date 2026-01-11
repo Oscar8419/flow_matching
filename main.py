@@ -40,6 +40,9 @@ def main():
     logging.info("Dataset and DataLoader initialized.")
 
     model = RFSignalDiT().to(DEVICE)
+    if CONFIG['fm_model_path']:
+        model.load_state_dict(torch.load(CONFIG['fm_model_path'], map_location=DEVICE))
+        logging.info(f"load checkpoint from {CONFIG['fm_model_path']}")
     logging.info("Model initialized.")
     train(model, dataloader, run_checkpoint_dir)
 

@@ -14,11 +14,13 @@ def train(model, dataloader, checkpoint_dir):
 
     total_samples_processed = 0
     running_loss = 0.0
-    log_interval = 100  # 每多少个 batch 打印一次日志
 
     # 估算总 batch 数，用于 tqdm
     total_samples = CONFIG["num_samples"]
     estimated_batches = int(total_samples / CONFIG["batch_size"])
+    # 确保 log_interval 至少为 1，防止 ZeroDivisionError
+    log_interval = max(1, estimated_batches // CONFIG["times_log"])  # 每多少个 batch 打印一次日志
+    save_interval = int(CONFIG["num_samples"] / CONFIG["times_save"])
 
     # 使用 tqdm 包装 dataloader
     pbar = tqdm(enumerate(dataloader), total=estimated_batches,
@@ -78,6 +80,7 @@ def train(model, dataloader, checkpoint_dir):
 
         # 根据 total_samples_processed 保存模型
         if total_samples_processed >= CONFIG["num_samples"]:
+            logging.info(f"final epoch loss: {loss_val}")
             logging.info(
                 "Reached target number of samples. Saving final model and exiting.")
             save_path = os.path.join(checkpoint_dir, f"model_final.pth")
@@ -88,7 +91,6 @@ def train(model, dataloader, checkpoint_dir):
         # (total - B) // interval != total // interval 表示跨越了界限
         prev_count = total_samples_processed - B
         curr_count = total_samples_processed
-        save_interval = int(CONFIG["save_interval"])
 
         if (prev_count // save_interval) != (curr_count // save_interval):
             save_path = os.path.join(
