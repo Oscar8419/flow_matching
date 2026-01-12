@@ -123,6 +123,8 @@ class RFSignalDataset(IterableDataset):
                           '2ASK', '4ASK', '8ASK',
                           '16QAM', '64QAM',
                           '16APSK', '32APSK']
+        # 建立类别映射表
+        self.mod_to_idx = {mod: i for i, mod in enumerate(self.mod_types)}
 
     def __len__(self):
         return self.length
@@ -156,4 +158,6 @@ class RFSignalDataset(IterableDataset):
             x1_np = self.gen.generate_signal(mod_type)
             x1 = torch.from_numpy(x1_np)
 
-            yield x1
+            # 总是返回 (signal, label)
+            label = self.mod_to_idx[mod_type]
+            yield x1, torch.tensor(label, dtype=torch.long)
