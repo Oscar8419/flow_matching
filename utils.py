@@ -5,13 +5,15 @@ import os
 from config import CONFIG, DEVICE
 import logging
 from tqdm import tqdm
-from models import GRU
+from models import GRU, GRUformer
 
 
 def get_classifier_model():
     model_name = CONFIG["classifier_model"]
     if model_name == "GRU":
         return GRU().to(DEVICE)
+    elif model_name == "GRUformer":
+        return GRUformer().to(DEVICE)
     else:
         raise ValueError(f"Unknown classifier model: {model_name}")
 
@@ -121,12 +123,11 @@ def train_classifi(model, dataloader, checkpoint_dir):
     running_total = 0
 
     # 估算总 batch 数，用于 tqdm
-    total_samples = CONFIG["num_samples"]
+    total_samples = CONFIG["classifier_num_samples"]
     estimated_batches = int(total_samples / CONFIG["batch_size"])
     # 确保 log_interval 至少为 1
     log_interval = max(1, estimated_batches // CONFIG["times_log"])
-    save_interval = int(CONFIG["num_samples"] / CONFIG["times_save"])
-
+    save_interval = int(CONFIG["classifier_num_samples"] / CONFIG["times_save"])
     # 使用 tqdm 包装 dataloader
     pbar = tqdm(enumerate(dataloader), total=estimated_batches,
                 desc="Training Classifier", unit="batch")
@@ -175,7 +176,7 @@ def train_classifi(model, dataloader, checkpoint_dir):
             running_total = 0
 
         # 结束条件
-        if total_samples_processed >= CONFIG["num_samples"]:
+        if total_samples_processed >= CONFIG["classifier_num_samples"]:
             logging.info(f"Final batch loss: {loss_val:.4f}, acc: {acc:.4f}")
             logging.info(
                 "Reached target number of samples. Saving final classifier model and exiting.")

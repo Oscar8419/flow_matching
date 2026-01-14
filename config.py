@@ -5,8 +5,8 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 CONFIG = {
     # Classifier training hyperparameters
-    "classifier_model": "GRU",
-    "classifier_num_samples": 1e5,  # 分类训练总样本数量
+    "classifier_model": "GRUformer",  # 可选: "GRU", "GRUformer"
+    "classifier_num_samples": 2e6,  # 分类训练总样本数量
     "classifier_snr_range": (-10, 0),  # 分类器训练时的 SNR 范围 (dB)
 
     # FM training hyperparameters
