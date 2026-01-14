@@ -61,9 +61,29 @@ class SignalGenerator:
         self.h_rrc = np.sinc(t/sps) * np.cos(np.pi*beta *
                                              t/sps) / (1 - (2*beta*t/sps)**2)
 
-    def generate_signal(self, mod_type='QPSK'):
+    def add_awgn(self, waveform, snr_db):
         """
-        生成一条 "干净但带有信道损伤" 的信号 (x1)
+        添加高斯白噪声 (AWGN)
+        """
+        # 计算信号功率
+        sig_power = np.mean(np.abs(waveform)**2)
+
+        # 根据 SNR 计算噪声功率
+        # SNR(dB) = 10 * log10(Ps / Pn)
+        # Pn = Ps / 10^(SNR/10)
+        noise_power = sig_power / (10**(snr_db / 10.0))
+
+        # 生成复高斯噪声 (实部虚部各分一半功率)
+        noise_std = np.sqrt(noise_power / 2.0)
+        noise = noise_std * (np.random.randn(len(waveform)) +
+                             1j * np.random.randn(len(waveform)))
+
+        return waveform + noise
+
+    def generate_signal(self, mod_type='QPSK', snr_db=None):
+        """
+        生成一条信号
+        snr_db: 如果不为 None,则添加指定 SNR 的 AWGN 噪声
         """
         # 1. 生成随机符号
         constellation = self.mod_schemes[mod_type]
@@ -102,7 +122,15 @@ class SignalGenerator:
         power = np.mean(np.abs(waveform)**2)
         waveform = waveform / np.sqrt(power)
 
-        # 5. 格式转换: Complex -> (2, N) 的实数数组 (I路和Q路)
+        # 5. 添加 AWGN (如果指定了 snr_db)
+        if snr_db is not None:
+            waveform = self.add_awgn(waveform, snr_db)
+            # 再次归一化? TODO: may change later
+            # 如果再次归一化，SNR 保持不变，但幅度范围受控，这对神经网络通常更好。
+            power = np.mean(np.abs(waveform)**2)
+            waveform = waveform / np.sqrt(power)
+
+        # 6. 格式转换: Complex -> (2, N) 的实数数组 (I路和Q路)
         # 这种格式可以直接喂给 PyTorch
         output = np.stack([waveform.real, waveform.imag],
                           axis=0).astype(np.float32)
@@ -111,13 +139,17 @@ class SignalGenerator:
 
 
 class RFSignalDataset(IterableDataset):
-    def __init__(self, length=CONFIG["num_samples"], signal_len=CONFIG["signal_length"]):
+    def __init__(self, num_samples=CONFIG["num_samples"], signal_len=CONFIG["signal_length"], snr_range=None):
         """
-        length: 数据集长度 (样本数量)
+        num_samples: 数据集长度 (样本数量)
         signal_len: 信号长度
+        snr_range: tuple (min_db, max_db) 或 None。
+                   如果为 None,生成无 AWGN 的"干净"信号 (用于 Flow Matching)
+                   如果为 tuple,生成随机 SNR 的噪声信号 (用于分类器训练)
         """
-        self.length = length
+        self.num_samples = num_samples
         self.signal_len = signal_len
+        self.snr_range = snr_range
         self.gen = SignalGenerator(num_symbols=signal_len//8)  # 假设 sps=8
         self.mod_types = ['2PSK', 'QPSK', '16PSK',
                           '2ASK', '4ASK', '8ASK',
@@ -127,20 +159,20 @@ class RFSignalDataset(IterableDataset):
         self.mod_to_idx = {mod: i for i, mod in enumerate(self.mod_types)}
 
     def __len__(self):
-        return self.length
+        return self.num_samples
 
     def __iter__(self):
         # 简单实现：每个 worker (如果有) 都生成一部分数据，或者在这里处理 worker_info
         # 由于是随机生成，只要长度一致即可。
-        # 为了兼容 DataLoader 的 len(dataloader) 计算，我们需要确保生成的总数大约为 self.length
+        # 为了兼容 DataLoader 的 len(dataloader) 计算，我们需要确保生成的总数大约为 self.num_samples
 
         worker_info = torch.utils.data.get_worker_info()
         if worker_info is None:  # Single-process
-            num_samples = self.length
+            num_samples = self.num_samples
         else:  # Multi-process
             # 将总长度平均分配给每个 worker
             per_worker = int(
-                np.ceil(self.length / float(worker_info.num_workers)))
+                np.ceil(self.num_samples / float(worker_info.num_workers)))
             worker_id = worker_info.id
             # 最后一个 worker 可能会少一点，或者多一点，这里简单处理
             num_samples = per_worker
@@ -154,8 +186,14 @@ class RFSignalDataset(IterableDataset):
             # 1. 随机选一种调制类型
             mod_type = np.random.choice(self.mod_types)
 
-            # 2. 生成 x1 (干净但有信道畸变的信号)
-            x1_np = self.gen.generate_signal(mod_type)
+            # 2. 确定 SNR
+            current_snr = None
+            if self.snr_range is not None:
+                current_snr = np.random.uniform(
+                    self.snr_range[0], self.snr_range[1])
+
+            # 3. 生成 x1
+            x1_np = self.gen.generate_signal(mod_type, snr_db=current_snr)
             x1 = torch.from_numpy(x1_np)
 
             # 总是返回 (signal, label)

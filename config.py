@@ -7,6 +7,7 @@ CONFIG = {
     # Classifier training hyperparameters
     "classifier_model": "GRU",
     "classifier_num_samples": 1e5,  # 分类训练总样本数量
+    "classifier_snr_range": (-10, 0),  # 分类器训练时的 SNR 范围 (dB)
 
     # FM training hyperparameters
     "learning_rate": 1e-4,
