@@ -58,10 +58,26 @@ class SignalGenerator:
 
         # 生成脉冲成型滤波器 (RRC Filter) - 限制信号的带宽（PSD），防止干扰邻道。
         num_taps = 11 * sps
-        beta = 0.35  # 滚降系数 #TODO: may sample this randomly later
-        t = np.arange(num_taps) - (num_taps-1)//2
-        self.h_rrc = np.sinc(t/sps) * np.cos(np.pi*beta *
-                                             t/sps) / (1 - (2*beta*t/sps)**2)
+        beta = 0.35
+        t = np.arange(num_taps) - (num_taps - 1) // 2
+        t_norm = t / sps
+
+        self.h_rrc = np.zeros_like(t_norm)
+        for i, ti in enumerate(t_norm):
+            if abs(ti) < 1e-8:
+                self.h_rrc[i] = 1 - beta + 4 * beta / np.pi
+            elif abs(abs(ti) - 1 / (4 * beta)) < 1e-8:
+                self.h_rrc[i] = (beta / np.sqrt(2)) * (
+                    (1 + 2 / np.pi) * np.sin(np.pi / (4 * beta)) +
+                    (1 - 2 / np.pi) * np.cos(np.pi / (4 * beta))
+                )
+            else:
+                self.h_rrc[i] = (np.sin(np.pi * ti * (1 - beta)) +
+                                 4 * beta * ti * np.cos(np.pi * ti * (1 + beta))) / \
+                                (np.pi * ti * (1 - (4 * beta * ti) ** 2))
+
+        # 能量归一化
+        self.h_rrc = self.h_rrc / np.sqrt(np.sum(self.h_rrc ** 2))
 
         # 生成高斯滤波器 (GMSK Pulse Shaping)
         bt = 0.3  # GMSK BT product (e.g. GSM standard)
