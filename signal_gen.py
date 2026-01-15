@@ -1,18 +1,18 @@
 import torch
 from torch.utils.data import IterableDataset
 import numpy as np
+from scipy.signal import hilbert
 from config import CONFIG
 
 
 class SignalGenerator:
-    def __init__(self, sample_rate=1e6, sps=8, num_symbols=128):
+    def __init__(self, sps=8, num_symbols=128):
         """
         sps: Samples Per Symbol (每个符号采样的点数，通常 4 或 8)
         num_symbols: 信号包含的符号数量
         """
         self.sps = sps
         self.num_symbols = num_symbols
-        self.fs = sample_rate
 
         # 定义调制方式
         self.mod_schemes = {}
@@ -20,6 +20,8 @@ class SignalGenerator:
         # PSK
         self.mod_schemes['2PSK'] = [1+0j, -1+0j]
         self.mod_schemes['QPSK'] = [1+1j, 1-1j, -1+1j, -1-1j]
+        self.mod_schemes['8PSK'] = [
+            np.exp(1j * 2 * np.pi * k / 8) for k in range(8)]
         self.mod_schemes['16PSK'] = [
             np.exp(1j * 2 * np.pi * k / 16) for k in range(16)]
 
@@ -61,6 +63,18 @@ class SignalGenerator:
         self.h_rrc = np.sinc(t/sps) * np.cos(np.pi*beta *
                                              t/sps) / (1 - (2*beta*t/sps)**2)
 
+        # 生成高斯滤波器 (GMSK Pulse Shaping)
+        bt = 0.3  # GMSK BT product (e.g. GSM standard)
+        # sigma derived from BT: sigma = sqrt(ln2) / (2*pi*BT)
+        sigma_gauss = np.sqrt(np.log(2)) / (2 * np.pi * bt)
+        # Gaussian function
+        # Note: t is in samples. t/sps normalized to symbol periods.
+        t_gauss = np.arange(num_taps) - (num_taps-1)//2
+        self.h_gauss = (1 / (np.sqrt(2*np.pi) * sigma_gauss * sps)) * \
+            np.exp(-((t_gauss/sps)**2) / (2 * sigma_gauss**2))
+        # Normalize so that the sum (integral) over time is 1
+        self.h_gauss = self.h_gauss / np.sum(self.h_gauss)
+
     def add_awgn(self, waveform, snr_db):
         """
         添加高斯白噪声 (AWGN)
@@ -85,17 +99,74 @@ class SignalGenerator:
         生成一条信号
         snr_db: 如果不为 None,则添加指定 SNR 的 AWGN 噪声
         """
-        # 1. 生成随机符号
-        constellation = self.mod_schemes[mod_type]
-        indices = np.random.randint(0, len(constellation), self.num_symbols)
-        symbols = np.array([constellation[i] for i in indices])
+        if mod_type == 'GMSK':
+            # GMSK 调制
+            # 1. 生成二进制序列 (-1, +1)
+            bits = 2 * np.random.randint(0, 2, self.num_symbols) - 1
 
-        # 2. 上采样 (Upsampling)
-        upsampled = np.zeros(self.num_symbols * self.sps, dtype=complex)
-        upsampled[::self.sps] = symbols
+            # 2. 上采样
+            upsampled = np.zeros(self.num_symbols * self.sps)
+            upsampled[::self.sps] = bits
 
-        # 3. 脉冲成型 (卷积 RRC 滤波器)
-        waveform = np.convolve(upsampled, self.h_rrc, mode='same')
+            # 3. 高斯滤波 (得到频率脉冲)
+            freq_pulse = np.convolve(upsampled, self.h_gauss, mode='same')
+
+            # 4. 积分得到相位 (相位累积)
+            # MSK modulation index h = 0.5, total phase shift per symbol is pi/2
+            # Since sum(h_gauss) = 1, cumsum(freq_pulse) for one symbol increases by 1.
+            # We scale by pi/2.
+            phase = np.cumsum(freq_pulse) * (np.pi / 2)
+            waveform = np.exp(1j * phase)
+
+        elif mod_type == 'FM':
+            # 模拟 FM 信号 (Analog FM)
+            # 1. 源信号: 使用随机的高斯噪声模拟连续的音频/模拟信号
+            source = np.random.randn(self.num_symbols)
+
+            # 2. 上采样: 扩展到目标采样率
+            upsampled = np.zeros(self.num_symbols * self.sps)
+            upsampled[::self.sps] = source
+
+            # 3. 滤波平滑 (使用 RRC 作为低通重建滤波器) -> 得到带限消息信号 m(t)
+            msg_signal = np.convolve(upsampled, self.h_rrc, mode='same')
+
+            # 4. FM 调制: x(t) = exp(j * (2*pi*f_c*t + cumsum(m(t))))
+            # 基带信号仅需关心相位项: exp(j * phase)
+            # sensitivity 控制调制指数 (Modulation Index) 和带宽
+            sensitivity = 1.0
+            phase = np.cumsum(msg_signal) * sensitivity
+            waveform = np.exp(1j * phase)
+
+        elif mod_type == 'AM-SSB':
+            # 模拟 AM-SSB 信号 (Analog Single Sideband - USB)
+            # 1. 源信号: 使用随机的高斯噪声模拟连续的音频/模拟信号
+            source = np.random.randn(self.num_symbols)
+
+            # 2. 上采样
+            upsampled = np.zeros(self.num_symbols * self.sps)
+            upsampled[::self.sps] = source
+
+            # 3. 滤波平滑
+            msg_signal = np.convolve(upsampled, self.h_rrc, mode='same')
+
+            # 4. 希尔伯特变换得到解析信号 (Complex Baseband for USB)
+            # Analytic signal = m(t) + j * hilbert(m(t))
+            waveform = hilbert(msg_signal)
+
+        else:
+            # 数字调制 (PSK/QAM/APSK等)
+            # 1. 生成随机符号
+            constellation = self.mod_schemes[mod_type]
+            indices = np.random.randint(
+                0, len(constellation), self.num_symbols)
+            symbols = np.array([constellation[i] for i in indices])
+
+            # 2. 上采样 (Upsampling)
+            upsampled = np.zeros(self.num_symbols * self.sps, dtype=complex)
+            upsampled[::self.sps] = symbols
+
+            # 3. 脉冲成型 (卷积 RRC 滤波器)
+            waveform = np.convolve(upsampled, self.h_rrc, mode='same')
 
         # --- 以下是添加信道损伤 (关键步骤) ---
 
@@ -151,10 +222,10 @@ class RFSignalDataset(IterableDataset):
         self.signal_len = signal_len
         self.snr_range = snr_range
         self.gen = SignalGenerator(num_symbols=signal_len//8)  # 假设 sps=8
-        self.mod_types = ['2PSK', 'QPSK', '16PSK',
-                          '2ASK', '4ASK', '8ASK',
+        self.mod_types = ['QPSK', '8PSK',
+                          '4ASK', '8ASK',
                           '16QAM', '64QAM',
-                          '16APSK', '32APSK']
+                          '32APSK', 'FM', 'GMSK', 'AM-SSB']
         # 建立类别映射表
         self.mod_to_idx = {mod: i for i, mod in enumerate(self.mod_types)}
 
