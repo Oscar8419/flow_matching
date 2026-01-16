@@ -238,10 +238,10 @@ class RFSignalDataset(IterableDataset):
         self.signal_len = signal_len
         self.snr_range = snr_range
         self.gen = SignalGenerator(num_symbols=signal_len//8)  # 假设 sps=8
-        self.mod_types = ['2PSK', 'QPSK', '16PSK',
+        self.mod_types = ['QPSK', '8PSK',
                           '2ASK', '4ASK', '8ASK',
                           '16QAM', '64QAM',
-                          '16APSK', '32APSK']
+                          '16APSK', '32APSK', 'GMSK']
         # 建立类别映射表
         self.mod_to_idx = {mod: i for i, mod in enumerate(self.mod_types)}
 
