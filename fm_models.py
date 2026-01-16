@@ -167,3 +167,48 @@ class RFSignalDiT(nn.Module):
 
         # Flow Matching 预测的是向量场 v (即 x1 - x0 )
         return output
+
+    @torch.no_grad()
+    def predict_x1(self, xt, t_start, steps=50):
+        """
+        使用欧拉法 (Euler Method) 从当前时刻 t_start 逐步推演到 t=1 (Clean)。
+
+        对于 Flow Matching 的OT路径:
+        dx/dt = v(x, t)
+
+        Euler Update:
+        x(t + dt) = x(t) + v(x, t) * dt
+        """
+        # 如果是标量，扩展为 batch
+        if isinstance(t_start, float) or (isinstance(t_start, torch.Tensor) and t_start.ndim == 0):
+            t_curr = torch.ones(xt.shape[0], device=xt.device) * t_start
+        else:
+            t_curr = t_start
+
+        # 即使 t_start 是向量，我们也假设大家步调一致，取第一个的值来生成时间网格
+        # 如果 batch 内 t_start 不同，则需要更复杂的 mask 处理，这里简化假设一致。
+        t_scalar = t_curr[0].item()
+
+        if t_scalar >= 1.0:
+            return xt
+
+        dt = (1.0 - t_scalar) / steps
+        current_x = xt.clone()
+
+        # 生成时间步 (t_start -> ... -> 1.0)
+        # 注意: 如果 steps=1, 只需要计算 v(t_start) 然后走一步到达 1.0
+        time_grid = torch.linspace(t_scalar, 1.0, steps + 1, device=xt.device)
+
+        for i in range(steps):
+            # 当前时间 t
+            t_now = time_grid[i]
+            # 构造 batch 的 t 输入
+            t_batch = torch.full((xt.shape[0],), t_now, device=xt.device)
+
+            # 1. 预测速度场 v
+            v_pred = self.forward(current_x, t_batch)
+
+            # 2. 欧拉更新: x(new) = x(old) + v * dt
+            current_x = current_x + v_pred * dt
+
+        return current_x
