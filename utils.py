@@ -50,9 +50,13 @@ def train_fm(model, dataloader, checkpoint_dir):
         # 为了能量匹配，我们将 x0 除以 sqrt(2)，使其总功率也为 1。
         x0 = torch.randn_like(x1).to(DEVICE) / 1.41421
 
-        # B. 采样 t (Uniform [0, 1])
-        # t shape: (B,)
-        t = torch.rand(B, device=DEVICE)
+        # B. 采样 t, shape: (B,)
+        # 0.24 对应 -10dB
+        # 简单方案：以 90% 的概率采样 [0.24, 1]，10% 的概率采样 [0, 0.24]
+        mask = torch.rand(B, device=DEVICE) < 0.9
+        t_high = torch.rand(B, device=DEVICE) * (1 - 0.24) + 0.24
+        t_low  = torch.rand(B, device=DEVICE) * 0.24
+        t = torch.where(mask, t_high, t_low)
 
         # C. 构造 Conditional Flow Path (Optimal Transport / Linear Interpolation)
         # x_t = (1 - t) * x0 + t * x1
