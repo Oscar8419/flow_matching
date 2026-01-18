@@ -33,8 +33,14 @@ class SignalGenerator:
         # QAM
         self.mod_schemes['16QAM'] = [x + 1j*y for x in [-3, -1, 1, 3]
                                      for y in [-3, -1, 1, 3]]
+        # 32QAM: 6x6 grid minus 4 corners (size 1)
+        self.mod_schemes['32QAM'] = [x + 1j*y for x in range(-5, 6, 2) for y in range(-5, 6, 2)
+                                     if not (abs(x) > 3 and abs(y) > 3)]
         self.mod_schemes['64QAM'] = [
             x + 1j*y for x in range(-7, 8, 2) for y in range(-7, 8, 2)]
+        # 128QAM: 12x12 grid minus 4 corners (size 2x2, total 16 pts removed)
+        self.mod_schemes['128QAM'] = [x + 1j*y for x in range(-11, 12, 2) for y in range(-11, 12, 2)
+                                      if not (abs(x) > 7 and abs(y) > 7)]
 
         # APSK (DVB-S2 standard-like radii ratios)
         # 16APSK: 4+12
@@ -49,6 +55,23 @@ class SignalGenerator:
                                      [r2 * np.exp(1j * (np.pi/6 + k*np.pi/6)) for k in range(12)] + \
                                      [r3 * np.exp(1j * (k*np.pi/8))
                                       for k in range(16)]
+
+        # 64APSK: 4+12+20+28
+        r1, r2, r3, r4 = 1.0, 2.5, 4.3, 6.2
+        self.mod_schemes['64APSK'] = [r1 * np.exp(1j * (np.pi/4 + k*np.pi/2)) for k in range(4)] + \
+                                     [r2 * np.exp(1j * (np.pi/6 + k*np.pi/6)) for k in range(12)] + \
+                                     [r3 * np.exp(1j * (k*np.pi/10)) for k in range(20)] + \
+                                     [r4 * np.exp(1j * (k*np.pi/14))
+                                      for k in range(28)]
+
+        # 128APSK: 8+16+24+32+48
+        r_list = [1.0, 2.6, 4.2, 5.8, 7.4]
+        n_list = [8, 16, 24, 32, 48]
+        self.mod_schemes['128APSK'] = []
+        for ri, ni in zip(r_list, n_list):
+            self.mod_schemes['128APSK'].extend(
+                [ri * np.exp(1j * (k * 2 * np.pi / ni)) for k in range(ni)]
+            )
 
         # 预先归一化星座图能量
         for k, v in self.mod_schemes.items():
@@ -240,8 +263,8 @@ class RFSignalDataset(IterableDataset):
         self.gen = SignalGenerator(num_symbols=signal_len//8)  # 假设 sps=8
         self.mod_types = ['QPSK', '8PSK',
                           '2ASK', '4ASK', '8ASK',
-                          '16QAM', '64QAM',
-                          '16APSK', '32APSK', 'GMSK']
+                          '16QAM', '32QAM', '64QAM', '128QAM',
+                          '16APSK', '32APSK', '64APSK', '128APSK', 'GMSK']
         # 建立类别映射表
         self.mod_to_idx = {mod: i for i, mod in enumerate(self.mod_types)}
 

@@ -30,7 +30,7 @@ CONFIG = {
     "hidden_size": 256*2,
     "depth": 10,
     "num_heads": 8,
-    "num_classes": 10,  # not used in unconditional model
+    "num_classes": 14,  #
 
 
 }
