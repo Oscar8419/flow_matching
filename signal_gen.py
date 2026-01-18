@@ -275,14 +275,16 @@ class RFSignalDataset(IterableDataset):
 
             # 2. 确定 SNR
             current_snr = None
+            snr_val = 100.0  # 默认 100dB 表示这里是 Clean Signal
             if self.snr_range is not None:
                 current_snr = np.random.uniform(
                     self.snr_range[0], self.snr_range[1])
+                snr_val = current_snr
 
             # 3. 生成 x1
             x1_np = self.gen.generate_signal(mod_type, snr_db=current_snr)
             x1 = torch.from_numpy(x1_np)
 
-            # 总是返回 (signal, label)
+            # 总是返回 (signal, label, snr)
             label = self.mod_to_idx[mod_type]
-            yield x1, torch.tensor(label, dtype=torch.long)
+            yield x1, torch.tensor(label, dtype=torch.long), torch.tensor(snr_val, dtype=torch.float32)

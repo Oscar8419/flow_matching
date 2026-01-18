@@ -38,9 +38,10 @@ def train_fm(model, dataloader, checkpoint_dir):
     pbar = tqdm(enumerate(dataloader), total=estimated_batches,
                 desc="Training", unit="batch")
 
-    for i, (x1, _) in pbar:
+    for i, (x1, _, _) in pbar:
         # x1: 目标信号 (Batch, 2, L)
         # _: 标签，Flow Matching 训练暂时不用
+        # _: SNR，Flow Matching 训练暂时不用 (因为这里我们是用 x1 自己加噪构造 Conditional Flow)
         x1 = x1.to(DEVICE)
         B = x1.shape[0]
 
@@ -55,7 +56,7 @@ def train_fm(model, dataloader, checkpoint_dir):
         # 简单方案：以 90% 的概率采样 [0.24, 1]，10% 的概率采样 [0, 0.24]
         mask = torch.rand(B, device=DEVICE) < 0.9
         t_high = torch.rand(B, device=DEVICE) * (1 - 0.24) + 0.24
-        t_low  = torch.rand(B, device=DEVICE) * 0.24
+        t_low = torch.rand(B, device=DEVICE) * 0.24
         t = torch.where(mask, t_high, t_low)
 
         # C. 构造 Conditional Flow Path (Optimal Transport / Linear Interpolation)
@@ -131,14 +132,16 @@ def train_classifi(model, dataloader, checkpoint_dir):
     estimated_batches = int(total_samples / CONFIG["batch_size"])
     # 确保 log_interval 至少为 1
     log_interval = max(1, estimated_batches // CONFIG["times_log"])
-    save_interval = int(CONFIG["classifier_num_samples"] / CONFIG["times_save"])
+    save_interval = int(
+        CONFIG["classifier_num_samples"] / CONFIG["times_save"])
     # 使用 tqdm 包装 dataloader
     pbar = tqdm(enumerate(dataloader), total=estimated_batches,
                 desc="Training Classifier", unit="batch")
 
-    for i, (x1, label) in pbar:
+    for i, (x1, label, _) in pbar:
         # x1: (Batch, 2, L)
         # label: (Batch,)
+        # _: SNR (暂时不用)
         x1 = x1.to(DEVICE)
         label = label.to(DEVICE)
         B = x1.shape[0]
@@ -198,3 +201,122 @@ def train_classifi(model, dataloader, checkpoint_dir):
                 checkpoint_dir, f"classifier_samples_{curr_count}.pth")
             torch.save(model.state_dict(), save_path)
             logging.info(f"Classifier checkpoint saved to {save_path}")
+
+
+def train_finetune(model_cls, model_fm, dataloader, checkpoint_dir):
+    model_cls.train()
+    model_fm.eval()  # Flow Matching 模型保持评估模式
+    optimizer = optim.Adam(model_cls.parameters(), lr=CONFIG["learning_rate"])
+    criterion = nn.CrossEntropyLoss()
+
+    total_samples_processed = 0
+    running_loss = 0.0
+    running_correct = 0
+    running_total = 0
+
+    # 估算总 batch 数
+    total_samples = CONFIG["num_samples_finetune"]
+    estimated_batches = int(total_samples / CONFIG["batch_size"])
+    log_interval = max(1, estimated_batches // CONFIG["times_log"])
+    save_interval = int(total_samples / CONFIG["times_save"])
+
+    pbar = tqdm(enumerate(dataloader), total=estimated_batches,
+                desc="Finetuning Classifier", unit="batch")
+
+    # FM 推理步数
+    FM_STEPS = 30
+
+    for i, (noisy_sig, label, snr) in pbar:
+        noisy_sig = noisy_sig.to(DEVICE)
+        label = label.to(DEVICE)
+        snr = snr.to(DEVICE)
+        B = noisy_sig.shape[0]
+
+        # --- 1. FM 去噪过程 (无梯度) ---
+        with torch.no_grad():
+            # 计算扩散时间步 t
+            # snr_db -> R -> t
+            # R = 10^(snr / 20)
+            # t = R / (1 + R)
+            R = 10 ** (snr / 20.0)
+            t_start = R / (1 + R)
+
+            # 计算输入缩放因子 (Matching eval_model logic)
+            # scale = sqrt((1-t)^2 + t^2)
+            scale_factor = torch.sqrt(
+                (1 - t_start)**2 + t_start**2).view(-1, 1, 1)
+
+            # FM 输入准备
+            xt = noisy_sig * scale_factor
+
+            # --- Batched Euler ODE Solver ---
+            # 计算每个样本的时间步长 dt = (1.0 - t_start) / steps
+            dt = (1.0 - t_start) / FM_STEPS
+            dt = dt.view(-1, 1, 1)  # (B, 1, 1) 用于广播
+
+            t_curr = t_start.clone()  # (B,)
+            curr_x = xt.clone()
+
+            for step in range(FM_STEPS):
+                # 预测速度场 v
+                v_pred = model_fm(curr_x, t_curr)
+
+                # Euler 更新: x_new = x_old + v * dt
+                curr_x = curr_x + v_pred * dt
+
+                # 更新时间: t_new = t_old + dt
+                t_curr = t_curr + dt.squeeze()  # squeeze 回 (B,) 以传入 model_fm
+
+            sig_denoised = curr_x
+
+        # --- 2. 微调分类器 (有梯度) ---
+        # 此时 sig_denoised 就像是"增强"过的数据
+        logits = model_cls(sig_denoised)
+        loss = criterion(logits, label)
+
+        optimizer.zero_grad()
+        loss.backward()
+
+        torch.nn.utils.clip_grad_norm_(model_cls.parameters(), max_norm=1.0)
+        optimizer.step()
+
+        # --- Metrics & Logging ---
+        loss_val = loss.item()
+        preds = torch.argmax(logits, dim=1)
+        correct = (preds == label).sum().item()
+        acc = correct / B
+
+        running_loss += loss_val
+        running_correct += correct
+        running_total += B
+        total_samples_processed += B
+
+        pbar.set_postfix({"loss": f"{loss_val:.4f}", "acc": f"{acc:.4f}"})
+
+        if (i + 1) % log_interval == 0:
+            avg_loss = running_loss / log_interval
+            avg_acc = running_correct / running_total
+            logging.info(
+                f"Batch {i+1} | Samples {total_samples_processed} | Loss: {avg_loss:.6f} | Acc: {avg_acc:.4f}")
+            running_loss = 0.0
+            running_correct = 0
+            running_total = 0
+
+        # 保存 Final Model
+        if total_samples_processed >= total_samples:
+            logging.info(f"Final batch loss: {loss_val:.4f}, acc: {acc:.4f}")
+            logging.info(
+                "Reached target number of samples. Saving finetuned model.")
+            save_path = os.path.join(
+                checkpoint_dir, f"classifier_finetuned_final.pth")
+            torch.save(model_cls.state_dict(), save_path)
+            break
+
+        # Checkpoint Saving
+        prev_count = total_samples_processed - B
+        curr_count = total_samples_processed
+        if (prev_count // save_interval) != (curr_count // save_interval):
+            save_path = os.path.join(
+                checkpoint_dir, f"classifier_finetuned_{curr_count}.pth")
+            torch.save(model_cls.state_dict(), save_path)
+            logging.info(f"Finetuned checkpoint saved to {save_path}")

@@ -9,6 +9,10 @@ CONFIG = {
     # Checkpoint paths
     "fm_model_path": None,
     "classifier_model_path": None,
+    # fine-tuning
+    "random_seed": 12345,
+    "num_samples_finetune": 1e5,
+    "finetune_snr_range": (-10, 0),
     # Classifier training hyperparameters
     "classifier_model": "GRUformer",  # 可选: "GRU", "GRUformer"
     "classifier_num_samples": 4e6,  # 分类训练总样本数量
