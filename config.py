@@ -11,7 +11,7 @@ CONFIG = {
     "classifier_model_path": None,
     # fine-tuning
     "random_seed": 12345,
-    "num_samples_finetune": 1e5,
+    "num_samples_finetune": 3e5,
     "finetune_snr_range": (-10, 0),
     # Classifier training hyperparameters
     "classifier_model": "GRUformer",  # 可选: "GRU", "GRUformer"

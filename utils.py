@@ -224,7 +224,7 @@ def train_finetune(model_cls, model_fm, dataloader, checkpoint_dir):
                 desc="Finetuning Classifier", unit="batch")
 
     # FM 推理步数
-    FM_STEPS = 30
+    FM_STEPS = 15
 
     for i, (noisy_sig, label, snr) in pbar:
         noisy_sig = noisy_sig.to(DEVICE)
@@ -251,7 +251,7 @@ def train_finetune(model_cls, model_fm, dataloader, checkpoint_dir):
 
             # --- Batched Euler ODE Solver ---
             # 计算每个样本的时间步长 dt = (1.0 - t_start) / steps
-            dt = (1.0 - t_start) / FM_STEPS
+            dt = (0.8 - t_start) / FM_STEPS
             dt = dt.view(-1, 1, 1)  # (B, 1, 1) 用于广播
 
             t_curr = t_start.clone()  # (B,)
@@ -268,6 +268,12 @@ def train_finetune(model_cls, model_fm, dataloader, checkpoint_dir):
                 t_curr = t_curr + dt.squeeze()  # squeeze 回 (B,) 以传入 model_fm
 
             sig_denoised = curr_x
+
+            # 归一化功率
+            energy = torch.sum(sig_denoised**2, dim=(1, 2), keepdim=True)
+            length = sig_denoised.shape[2]
+            power = energy / length
+            sig_denoised = sig_denoised / torch.sqrt(power + 1e-8)
 
         # --- 2. 微调分类器 (有梯度) ---
         # 此时 sig_denoised 就像是"增强"过的数据

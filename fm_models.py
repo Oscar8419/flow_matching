@@ -169,15 +169,9 @@ class RFSignalDiT(nn.Module):
         return output
 
     @torch.no_grad()
-    def predict_x1(self, xt, t_start, steps=50):
+    def predict_x1(self, xt, t_start, steps=50, method='euler'):
         """
-        使用欧拉法 (Euler Method) 从当前时刻 t_start 逐步推演到 t=1 (Clean)。
-
-        对于 Flow Matching 的OT路径:
-        dx/dt = v(x, t)
-
-        Euler Update:
-        x(t + dt) = x(t) + v(x, t) * dt
+        使用欧拉法 (Euler Method) 或中点法 (Midpoint Method) 从当前时刻 t_start 逐步推演。
         """
         # 如果是标量，扩展为 batch
         if isinstance(t_start, float) or (isinstance(t_start, torch.Tensor) and t_start.ndim == 0):
@@ -192,12 +186,12 @@ class RFSignalDiT(nn.Module):
         if t_scalar >= 1.0:
             return xt
 
-        dt = (1.0 - t_scalar) / steps
+        target_t = 0.8
+        dt = (target_t - t_scalar) / steps
         current_x = xt.clone()
 
-        # 生成时间步 (t_start -> ... -> 1.0)
-        # 注意: 如果 steps=1, 只需要计算 v(t_start) 然后走一步到达 1.0
-        time_grid = torch.linspace(t_scalar, 1.0, steps + 1, device=xt.device)
+        # 生成时间步 (t_start -> ... -> target_t)
+        time_grid = torch.linspace(t_scalar, target_t, steps + 1, device=xt.device)
 
         for i in range(steps):
             # 当前时间 t
@@ -205,10 +199,34 @@ class RFSignalDiT(nn.Module):
             # 构造 batch 的 t 输入
             t_batch = torch.full((xt.shape[0],), t_now, device=xt.device)
 
-            # 1. 预测速度场 v
-            v_pred = self.forward(current_x, t_batch)
+            if method == 'euler':
+                # 1. 预测速度场 v
+                v_pred = self.forward(current_x, t_batch)
+                # 2. 欧拉更新: x(new) = x(old) + v * dt
+                current_x = current_x + v_pred * dt
 
-            # 2. 欧拉更新: x(new) = x(old) + v * dt
-            current_x = current_x + v_pred * dt
+            elif method == 'midpoint':
+                # 1. 预测当前点速度 v1
+                v1 = self.forward(current_x, t_batch)
+                
+                # 2. 预测中点状态
+                x_mid = current_x + v1 * dt / 2
+                t_mid = t_now + dt / 2
+                t_mid_batch = torch.full((xt.shape[0],), t_mid, device=xt.device)
+                
+                # 3. 预测中点速度 v2
+                v2 = self.forward(x_mid, t_mid_batch)
+                
+                # 4. 中点法更新
+                current_x = current_x + v2 * dt
+            
+            else:
+                raise ValueError(f"Unknown sampling method: {method}")
+
+        # 归一化功率
+        energy = torch.sum(current_x**2, dim=(1, 2), keepdim=True)
+        length = current_x.shape[2]
+        power = energy / length
+        current_x = current_x / torch.sqrt(power + 1e-8)
 
         return current_x

@@ -186,7 +186,7 @@ class CustomTransformerEncoderLayer(nn.Module):
 
 
 class GRUformer(nn.Module):
-    def __init__(self, input_dim=16, hidden_size=128, num_classes=10, num_layer=4, drop_rate=0.2):
+    def __init__(self, input_dim=16, hidden_size=128, num_classes=CONFIG["num_classes"], num_layer=4, drop_rate=0.2):
         super().__init__()
         self.input_dim = input_dim
 
