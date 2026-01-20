@@ -186,9 +186,10 @@ class CustomTransformerEncoderLayer(nn.Module):
 
 
 class GRUformer(nn.Module):
-    def __init__(self, input_dim=16, hidden_size=128, num_classes=CONFIG["num_classes"], num_layer=4, drop_rate=0.2):
+    def __init__(self, input_dim=16, hidden_size=128, num_classes=CONFIG["num_classes"], signal_len=CONFIG["signal_length"], num_layer=4, drop_rate=0.2):
         super().__init__()
         self.input_dim = input_dim
+        self.signal_len = signal_len
 
         self.gru1 = nn.GRU(
             input_size=input_dim,
@@ -211,7 +212,7 @@ class GRUformer(nn.Module):
                                                                      custom_ffn=GluFfn(dim=hidden_size, hidden_dim=hidden_size*4, activation='gelu'), norm_first=True,)
                                        for _ in range(num_layer)])
         self.pos_embed = nn.Parameter(
-            torch.zeros(1, 2048//input_dim, hidden_size))
+            torch.zeros(1, 2*signal_len//input_dim, hidden_size))
         self.cls_embed = nn.Parameter(torch.randn(1, 1, hidden_size)*0.02)
 
         self.fc = nn.Linear(hidden_size, num_classes)
@@ -230,11 +231,11 @@ class GRUformer(nn.Module):
                 nn.init.zeros_(param)
 
     def forward(self, x: torch.Tensor):
-        x = x.permute(0, 2, 1)  # [N,1024,2]
+        x = x.permute(0, 2, 1)  # [N, signal_len, 2]
         batch_size = x.size(0)
         x = x.reshape(batch_size, -1, self.input_dim//2, 2)\
             .transpose(-2, -1).contiguous().reshape(batch_size, -1, self.input_dim)
-        # x.shape = [N, a,self.input_dim] ,a = 2048 // self.input_dim
+        # x.shape = [N, a,self.input_dim] ,a = 2*signal_len // self.input_dim
 
         # [N, a-1,self.input_dim], drop the last to speed up transformer encoder
         x = x[:, :-1, :]

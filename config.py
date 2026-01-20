@@ -22,7 +22,8 @@ CONFIG = {
     "learning_rate": 1e-4,
     "batch_size": 64*8,  # 每个 batch 的样本数量
     "num_samples": 3e6,  # 总样本数量
-    "signal_length": 1024,  # 每个信号的长度
+    "signal_length": 512,  # 每个信号的长度
+    "sps": 8,  # 每个符号的采样点数
     "num_workers": 8,  # DataLoader 的 num_workers
 
     # model hyperparameters

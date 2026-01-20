@@ -260,7 +260,8 @@ class RFSignalDataset(IterableDataset):
         self.num_samples = num_samples
         self.signal_len = signal_len
         self.snr_range = snr_range
-        self.gen = SignalGenerator(num_symbols=signal_len//8)  # 假设 sps=8
+        self.gen = SignalGenerator(
+            sps=CONFIG["sps"], num_symbols=signal_len//CONFIG["sps"])  #
         self.mod_types = ['QPSK', '8PSK',
                           '2ASK', '4ASK', '8ASK',
                           '16QAM', '32QAM', '64QAM', '128QAM',
@@ -278,7 +279,7 @@ class RFSignalDataset(IterableDataset):
 
         worker_info = torch.utils.data.get_worker_info()
         if worker_info is None:  # Single-process
-            num_samples = self.num_samples
+            num_samples = int(self.num_samples)
         else:  # Multi-process
             # 将总长度平均分配给每个 worker
             per_worker = int(
