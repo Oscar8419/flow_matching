@@ -218,13 +218,13 @@ def train_finetune(model_cls, model_fm, dataloader, checkpoint_dir):
     total_samples = CONFIG["num_samples_finetune"]
     estimated_batches = int(total_samples / CONFIG["batch_size"])
     log_interval = max(1, estimated_batches // CONFIG["times_log"])
-    save_interval = int(total_samples / (CONFIG["times_save"]*2))
+    save_interval = int(total_samples / (CONFIG["times_save"]*4))
 
     pbar = tqdm(enumerate(dataloader), total=estimated_batches,
                 desc="Finetuning Classifier", unit="batch")
 
     # FM 推理步数
-    FM_STEPS = 50
+    FM_STEPS = 100
 
     for i, (noisy_sig, label, snr) in pbar:
         noisy_sig = noisy_sig.to(DEVICE)

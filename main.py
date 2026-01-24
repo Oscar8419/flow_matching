@@ -113,7 +113,7 @@ def main():
             dataset_ft,
             batch_size=CONFIG["batch_size"],
             shuffle=False,
-            num_workers=CONFIG["num_workers"]
+            num_workers=0
         )
         # Finetuning logic here
         model_classifi = get_classifier_model()

@@ -29,7 +29,7 @@ class DiTBlock1D(nn.Module):
         self.norm1 = nn.LayerNorm(
             hidden_size, eps=1e-6, elementwise_affine=False)
         self.attn = nn.MultiheadAttention(
-            hidden_size, num_heads, batch_first=True)
+            hidden_size, num_heads, dropout=0.1,batch_first=True)
         self.norm2 = nn.LayerNorm(
             hidden_size, eps=1e-6, elementwise_affine=False)
         self.mlp = nn.Sequential(

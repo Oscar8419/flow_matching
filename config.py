@@ -11,11 +11,11 @@ CONFIG = {
     "classifier_model_path": None,
     # fine-tuning
     "random_seed": 1234,
-    "num_samples_finetune": 8e4,
-    "finetune_snr_range": (-5, 5),
+    "num_samples_finetune": 5e4,
+    "finetune_snr_range": (-10, 0),
     # Classifier training hyperparameters
     "classifier_model": "GRUformer",  # 可选: "GRU", "GRUformer"
-    "classifier_num_samples": 4e6,  # 分类训练总样本数量
+    "classifier_num_samples": 5e6,  # 分类训练总样本数量
     "classifier_snr_range": (-10, 20),  # 分类器训练时的 SNR 范围 (dB)
 
     # FM training hyperparameters
