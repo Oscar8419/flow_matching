@@ -10,9 +10,9 @@ CONFIG = {
     "fm_model_path": None,
     "classifier_model_path": None,
     # fine-tuning
-    "random_seed": 12345,
-    "num_samples_finetune": 3e5,
-    "finetune_snr_range": (-10, 0),
+    "random_seed": 1234,
+    "num_samples_finetune": 8e4,
+    "finetune_snr_range": (-5, 5),
     # Classifier training hyperparameters
     "classifier_model": "GRUformer",  # 可选: "GRU", "GRUformer"
     "classifier_num_samples": 4e6,  # 分类训练总样本数量
@@ -21,8 +21,8 @@ CONFIG = {
     # FM training hyperparameters
     "learning_rate": 1e-4,
     "batch_size": 64*8,  # 每个 batch 的样本数量
-    "num_samples": 3e6,  # 总样本数量
-    "signal_length": 512,  # 每个信号的长度
+    "num_samples": 5e6,  # 总样本数量
+    "signal_length": 1024,  # 每个信号的长度
     "sps": 8,  # 每个符号的采样点数
     "num_workers": 8,  # DataLoader 的 num_workers
 

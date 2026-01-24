@@ -206,7 +206,7 @@ def train_classifi(model, dataloader, checkpoint_dir):
 def train_finetune(model_cls, model_fm, dataloader, checkpoint_dir):
     model_cls.train()
     model_fm.eval()  # Flow Matching 模型保持评估模式
-    optimizer = optim.Adam(model_cls.parameters(), lr=CONFIG["learning_rate"])
+    optimizer = optim.Adam(model_cls.parameters(), lr=CONFIG["learning_rate"]/5)
     criterion = nn.CrossEntropyLoss()
 
     total_samples_processed = 0
@@ -218,13 +218,13 @@ def train_finetune(model_cls, model_fm, dataloader, checkpoint_dir):
     total_samples = CONFIG["num_samples_finetune"]
     estimated_batches = int(total_samples / CONFIG["batch_size"])
     log_interval = max(1, estimated_batches // CONFIG["times_log"])
-    save_interval = int(total_samples / CONFIG["times_save"])
+    save_interval = int(total_samples / (CONFIG["times_save"]*2))
 
     pbar = tqdm(enumerate(dataloader), total=estimated_batches,
                 desc="Finetuning Classifier", unit="batch")
 
     # FM 推理步数
-    FM_STEPS = 15
+    FM_STEPS = 50
 
     for i, (noisy_sig, label, snr) in pbar:
         noisy_sig = noisy_sig.to(DEVICE)
