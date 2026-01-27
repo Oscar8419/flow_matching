@@ -249,7 +249,7 @@ class SignalGenerator:
 
 
 class RFSignalDataset(IterableDataset):
-    def __init__(self, num_samples=CONFIG["num_samples"], signal_len=CONFIG["signal_length"], snr_range=None):
+    def __init__(self, num_samples=CONFIG["num_samples"], signal_len=CONFIG["signal_length"], snr_range=None, seed=42):
         """
         num_samples: 数据集长度 (样本数量)
         signal_len: 信号长度
@@ -260,6 +260,7 @@ class RFSignalDataset(IterableDataset):
         self.num_samples = num_samples
         self.signal_len = signal_len
         self.snr_range = snr_range
+        self.seed = seed
         self.gen = SignalGenerator(
             sps=CONFIG["sps"], num_symbols=signal_len//CONFIG["sps"])  #
         self.mod_types = ['QPSK', '8PSK',
@@ -278,8 +279,10 @@ class RFSignalDataset(IterableDataset):
         # 为了兼容 DataLoader 的 len(dataloader) 计算，我们需要确保生成的总数大约为 self.num_samples
 
         worker_info = torch.utils.data.get_worker_info()
+        seed = self.seed # Base seed for reproducibility
         if worker_info is None:  # Single-process
             num_samples = int(self.num_samples)
+            np.random.seed(seed)
         else:  # Multi-process
             # 将总长度平均分配给每个 worker
             per_worker = int(
@@ -288,10 +291,8 @@ class RFSignalDataset(IterableDataset):
             # 最后一个 worker 可能会少一点，或者多一点，这里简单处理
             num_samples = per_worker
 
-            # 重要：为了防止所有 worker 生成相同的随机数序列，需要重新 seed
-            # 可以在这里基于 seed + worker_id 设置 numpy 的随机种子
-            # np.random.seed(seed + worker_id)
-            np.random.seed((torch.initial_seed() + worker_id) % (2**32))
+            # 固定种子，确保每个 Epoch/循环 产生的数据序列是相同的
+            np.random.seed(seed + worker_id)
 
         for _ in range(num_samples):
             # 1. 随机选一种调制类型

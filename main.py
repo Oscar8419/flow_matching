@@ -23,8 +23,6 @@ def main():
     args = parser.parse_args()
     assert args.f or args.c or args.t, "At least one of -f (Flow Matching), -c (Classifier), or -t (Finetune) must be specified."
 
-    torch.manual_seed(42)
-    np.random.seed(42)
     # 配置 logging
     logging.basicConfig(
         level=logging.INFO,
@@ -52,7 +50,8 @@ def main():
         dataset_fm = RFSignalDataset(
             num_samples=CONFIG["num_samples"],
             signal_len=CONFIG["signal_length"],
-            snr_range=None
+            snr_range=None,
+            seed=420
         )
         dataloader_fm = DataLoader(
             dataset_fm,
@@ -76,9 +75,10 @@ def main():
         logging.info(">>> Start Training Classifier Model")
         # Classifier 使用噪声数据 (snr_range from CONFIG)
         dataset_cls = RFSignalDataset(
-            num_samples=CONFIG["classifier_num_samples"],
+            num_samples=CONFIG["samples_per_epoch"],
             signal_len=CONFIG["signal_length"],
-            snr_range=CONFIG["classifier_snr_range"]
+            snr_range=CONFIG["classifier_snr_range"],
+            seed=42
         )
         dataloader_cls = DataLoader(
             dataset_cls,
@@ -102,12 +102,11 @@ def main():
 
     if args.t:
         logging.info(">>> Start Finetuning Classifier Model")
-        torch.manual_seed(CONFIG["random_seed"])
-        np.random.seed(CONFIG["random_seed"])
         dataset_ft = RFSignalDataset(
             num_samples=CONFIG["num_samples_finetune"],
             signal_len=CONFIG["signal_length"],
-            snr_range=CONFIG["finetune_snr_range"]
+            snr_range=CONFIG["finetune_snr_range"],
+            seed=CONFIG["random_seed"]
         )
         dataloader_ft = DataLoader(
             dataset_ft,

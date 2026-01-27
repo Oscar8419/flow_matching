@@ -142,7 +142,12 @@ def train_classifi(model, dataloader, checkpoint_dir):
     save_interval = int(
         CONFIG["classifier_num_samples"] / CONFIG["times_save"])
     # 使用 tqdm 包装 dataloader
-    pbar = tqdm(enumerate(dataloader), total=estimated_batches,
+    def cycle(iterable):
+        while True:
+            for x in iterable:
+                yield x
+
+    pbar = tqdm(enumerate(cycle(dataloader)), total=estimated_batches,
                 desc="Training Classifier", unit="batch")
 
     for i, (x1, label, _) in pbar:

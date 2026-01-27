@@ -15,7 +15,8 @@ CONFIG = {
     "finetune_snr_range": (-5, 5),
     # Classifier training hyperparameters
     "classifier_model": "GRUformer",  # 可选: "GRU", "GRUformer","LSTM",  "MCLDNN", "Transformer","ICAMC"
-    "classifier_num_samples": 6e6,  # 分类训练总样本数量
+    "classifier_num_samples": 3e6,  # 分类训练总样本数量
+    "samples_per_epoch": 3e5,  # 定义每个 Epoch 的样本数量 (用于控制数据集重置频率)
     "classifier_snr_range": (-10, 20),  # 分类器训练时的 SNR 范围 (dB)
 
     # FM training hyperparameters
