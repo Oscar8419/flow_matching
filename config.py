@@ -7,15 +7,15 @@ CONFIG = {
     "times_log": 20,  # 每次训练报告 x 次损失日志
     "times_save": 5,  # 每次训练保存 x 次模型参数
     # Checkpoint paths
-    "fm_model_path": None,
+    "fm_model_path": "/root/code/flow_matching/checkpoints/01-19--11-23/model_final.pth",
     "classifier_model_path": None,
     # fine-tuning
     "random_seed": 1234,
-    "num_samples_finetune": 5e4,
-    "finetune_snr_range": (-10, 0),
+    "num_samples_finetune": 3e5,
+    "finetune_snr_range": (-5, 5),
     # Classifier training hyperparameters
-    "classifier_model": "GRUformer",  # 可选: "GRU", "GRUformer"
-    "classifier_num_samples": 5e6,  # 分类训练总样本数量
+    "classifier_model": "GRUformer",  # 可选: "GRU", "GRUformer","LSTM",  "MCLDNN", "Transformer","ICAMC"
+    "classifier_num_samples": 6e6,  # 分类训练总样本数量
     "classifier_snr_range": (-10, 20),  # 分类器训练时的 SNR 范围 (dB)
 
     # FM training hyperparameters

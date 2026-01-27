@@ -6,23 +6,19 @@ from config import CONFIG
 
 class GRU(nn.Module):
     def __init__(self,
-                 signal_length=CONFIG["signal_length"],
-                 patch_size=16,
                  hidden_size=256,
                  num_classes=CONFIG["num_classes"]):
         super().__init__()
-        self.patch_size = patch_size
-
-        # Ensure signal length is divisible by patch size
-        assert signal_length % patch_size == 0, "Signal length must be divisible by patch size"
-
-        self.seq_len = signal_length // patch_size
-        # Input dimension per step: 2 channels (I/Q) * patch_size
-        self.input_size = 2 * patch_size
-
         # Single layer unidirectional GRU
-        self.gru = nn.GRU(
-            input_size=self.input_size,
+        self.gru1 = nn.GRU(
+            input_size=2,
+            hidden_size=hidden_size,
+            num_layers=1,
+            batch_first=True,
+            bidirectional=False
+        )
+        self.gru2 = nn.GRU(
+            input_size=hidden_size,
             hidden_size=hidden_size,
             num_layers=1,
             batch_first=True,
@@ -36,30 +32,221 @@ class GRU(nn.Module):
         """
         x: (Batch, 2, Signal_Length)
         """
-        B, C, L = x.shape
+        x = x.permute(0, 2, 1)  # (B, L, 2)
 
-        # 1. Slice and flatten Logic
-        # View as (Batch, 2, Num_Patches, Patch_Size)
-        x = x.view(B, C, self.seq_len, self.patch_size)
-
-        # Permute to (Batch, Num_Patches, 2, Patch_Size)
-        x = x.permute(0, 2, 1, 3)
-
-        # Flatten last two dimensions to create sequence element features
-        # (Batch, Num_Patches, 2 * Patch_Size)
-        x = x.reshape(B, self.seq_len, -1)
 
         # 2. GRU Forward
         # output shape: (Batch, Seq_Len, Hidden_Size)
-        output, _ = self.gru(x)
+        output1, _ = self.gru1(x)
+        output2, _ = self.gru2(output1)
 
         # 3. Take logic of last time step
-        last_output = output[:, -1, :]
+        last_output = output2[:, -1, :]
+        last_output = F.dropout(last_output, p=0.1)
 
         # 4. Classification
         logits = self.classifier(last_output)
 
         return logits
+
+class LSTM(nn.Module):
+    def __init__(self,
+                 hidden_size=256,
+                 num_classes=CONFIG["num_classes"]):
+        super().__init__()
+        # Single layer unidirectional LSTM
+        self.lstm1 = nn.LSTM(
+            input_size=2,
+            hidden_size=hidden_size,
+            num_layers=1,
+            batch_first=True,
+            bidirectional=False
+        )
+        self.lstm2 = nn.LSTM(
+            input_size=hidden_size,
+            hidden_size=hidden_size,
+            num_layers=1,
+            batch_first=True,
+            bidirectional=False
+        )
+
+        # Classification head
+        self.classifier = nn.Linear(hidden_size, num_classes)
+
+    def forward(self, x):
+        """
+        x: (Batch, 2, Signal_Length)
+        """
+        x = x.permute(0, 2, 1)  # (B, L, 2)
+
+
+        # 2. LSTM Forward
+        # output shape: (Batch, Seq_Len, Hidden_Size)
+        output1, _ = self.lstm1(x)
+        output2, _ = self.lstm2(output1)
+
+        # 3. Take logic of last time step
+        last_output = output2[:, -1, :]
+        last_output = F.dropout(last_output, p=0.1)
+
+        # 4. Classification
+        logits = self.classifier(last_output)
+
+        return logits
+
+class MCLDNN(nn.Module):
+    def __init__(self,  num_classes=CONFIG["num_classes"]):
+        super().__init__()
+        self.num_classes = num_classes
+        self.conv1 = nn.Sequential(
+            nn.Conv2d(1, 50, kernel_size=(2, 8), padding='same'),
+            nn.ReLU()
+        )
+        self.conv2 = nn.Sequential(
+            nn.ConstantPad1d((7, 0), 0),
+            nn.Conv1d(1, 50, kernel_size=8, padding=0),
+            nn.ReLU()
+        )
+        self.conv3 = nn.Sequential(
+            nn.ConstantPad1d((7, 0), 0),
+            nn.Conv1d(1, 50, kernel_size=8, padding=0),
+            nn.ReLU()
+        )
+        self.conv4 = nn.Sequential(
+            nn.Conv2d(50, 50, kernel_size=(1, 8), padding='same'),
+            nn.ReLU(),
+        )
+        self.conv5 = nn.Sequential(
+            nn.Conv2d(100, 100, kernel_size=(2, 5), padding='valid'),
+            nn.ReLU(),
+        )
+        self.lstm1 = nn.LSTM(input_size=100, hidden_size=128,
+                             batch_first=True, num_layers=1)
+        self.lstm2 = nn.LSTM(input_size=128, hidden_size=128,
+                             batch_first=True, num_layers=1)
+
+        self.classifier = nn.Sequential(
+            nn.Linear(128, 128),
+            nn.SELU(),
+            nn.Dropout(p=0.2),
+            nn.Linear(128, 128),
+            nn.SELU(),
+            nn.Dropout(p=0.2),
+            nn.Linear(128, num_classes),
+        )
+
+    def forward(self, x: torch.Tensor):
+         # [N, 2, 1024]
+        x = x.unsqueeze(1)  # [N, 1, 2,1024]
+        x1 = self.conv1(x)  # x1.shape=[N, 50, 2,1024]
+        x2 = self.conv2(x[:, :, 0, :])  # x2.shape=[N, 50, 1024]
+        x3 = self.conv3(x[:, :, 1, :])  # x3.shape=[N, 50, 1024]
+        # x4.shape=[N, 50, 2,1024]
+        x4 = self.conv4(torch.stack([x2, x3], dim=2))
+        # x5.shape=[N, 100, 1, 1020]
+        x5 = self.conv5(torch.cat([x1, x4], dim=1))
+        x5 = x5.permute(0, 2, 3, 1)  # [N, 1, 1020, 100]
+        x6 = x5.reshape(x5.size(0), -1, 100)  # x6.shape=[N, 1020, 100]
+        x, _ = self.lstm1(x6)
+        x, _ = self.lstm2(x)
+        x = x[:, -1, :]  # shape = [N, 128]
+        x = self.classifier(x)
+        return x
+
+class Transformer(nn.Module):
+    def __init__(self, input_dim=16, hidden_size=128, num_classes=CONFIG["num_classes"], signal_len=CONFIG["signal_length"], num_layer=4, drop_rate=0.2):
+        super().__init__()
+        self.input_dim = input_dim
+        self.signal_len = signal_len
+        self.encoder = nn.Sequential(*[CustomTransformerEncoderLayer(d_model=hidden_size, nhead=4, dropout=drop_rate,
+                                                                     custom_ffn=GluFfn(dim=hidden_size, hidden_dim=hidden_size*4, activation='gelu'), norm_first=True,)
+                                       for _ in range(num_layer)])
+        self.pos_embed = nn.Parameter(
+            torch.zeros(1, 2*signal_len//input_dim, hidden_size))
+        self.cls_embed = nn.Parameter(torch.randn(1, 1, hidden_size)*0.02)
+        self.project = nn.Linear(input_dim, hidden_size)
+        self.fc = nn.Linear(hidden_size, num_classes)
+
+    def forward(self, x: torch.Tensor):
+        x = x.permute(0, 2, 1)  # [N, signal_len, 2]
+        batch_size = x.size(0)
+        x = x.reshape(batch_size, -1, self.input_dim//2, 2)\
+            .transpose(-2, -1).contiguous().reshape(batch_size, -1, self.input_dim)
+        # x.shape = [N, a,self.input_dim] ,a = 2*signal_len // self.input_dim
+
+        # [N, a-1,self.input_dim], drop the last to speed up transformer encoder
+        x = x[:, :-1, :]
+        x = self.project(x)
+        cls_token = self.cls_embed.expand(batch_size, -1, -1)
+        x = torch.cat([cls_token, x], dim=1)  # [N, a,hidden_size]
+        x = x + self.pos_embed
+        x = self.encoder(x)
+        y = x[:, 0, :]
+        y = F.dropout(y, p=0.1)
+        out = self.fc(y)
+        return out
+
+class ICAMC(nn.Module):
+    def __init__(self, input_shape=[2, CONFIG["signal_length"]], num_classes=CONFIG["num_classes"]):
+        super(ICAMC, self).__init__()
+        self.conv1 = nn.Conv1d(2, 64, kernel_size=8, padding='same')
+        self.maxpool1 = nn.MaxPool1d(kernel_size=2, stride=2)
+        self.conv2 = nn.Conv1d(64, 64, kernel_size=4, padding='same')
+        self.conv3 = nn.Conv1d(64, 128, kernel_size=8,  padding='same')
+        self.maxpool2 = nn.MaxPool1d(kernel_size=1)
+        self.conv4 = nn.Conv1d(128, 128, kernel_size=8,  padding='same')
+        nn.init.xavier_uniform_(self.conv1.weight)
+        nn.init.xavier_uniform_(self.conv2.weight)
+        nn.init.xavier_uniform_(self.conv3.weight)
+        nn.init.xavier_uniform_(self.conv4.weight)
+        self.dropout = nn.Dropout(0.1)
+        self.flatten = nn.Flatten()
+        flattened_shape = self._get_flattened_shape(input_shape)
+
+        self.dense1 = nn.Linear(flattened_shape, 128)
+        self.dense2 = nn.Linear(128, num_classes)
+        self.softmax = nn.Softmax(dim=1)
+
+    def forward(self, x: torch.Tensor):
+          # [N, 2, 1024]
+        x = self.conv1(x)
+
+        x = F.relu(x)
+
+        x = self.maxpool1(x)
+        x = self.conv2(x)
+
+        x = F.relu(x)
+
+        x = self.conv3(x)
+
+        x = F.relu(x)
+        x = self.maxpool2(x)
+        x = self.dropout(x)
+        x = self.conv4(x)
+
+        x = F.relu(x)
+        x = self.dropout(x)
+        x = self.flatten(x)
+
+        x = self.dense1(x)
+        x = F.relu(x)
+        x = self.dropout(x)
+        x = self.dense2(x)
+        # x = self.softmax(x)
+        return x
+
+    def _get_flattened_shape(self, input_shape):
+        x = torch.zeros(1, *input_shape)
+        # x = x.unsqueeze(0)
+        x = self.conv1(x)
+        x = self.maxpool1(x)
+        x = self.conv2(x)
+        x = self.conv3(x)
+        x = self.maxpool2(x)
+        x = self.conv4(x)
+        flattened_shape = self.flatten(x).shape[1]
+        return flattened_shape
 
 
 class GluFfn(nn.Module):

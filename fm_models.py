@@ -186,7 +186,7 @@ class RFSignalDiT(nn.Module):
         if t_scalar >= 1.0:
             return xt
 
-        target_t = 0.8
+        target_t = 0.75
         dt = (target_t - t_scalar) / steps
         current_x = xt.clone()
 

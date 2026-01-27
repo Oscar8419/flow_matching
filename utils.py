@@ -5,15 +5,22 @@ import os
 from config import CONFIG, DEVICE
 import logging
 from tqdm import tqdm
-from models import GRU, GRUformer
+from models import GRU, GRUformer, LSTM, MCLDNN, Transformer, ICAMC
 
 
-def get_classifier_model():
-    model_name = CONFIG["classifier_model"]
+def get_classifier_model(model_name=CONFIG["classifier_model"]):
     if model_name == "GRU":
         return GRU().to(DEVICE)
     elif model_name == "GRUformer":
         return GRUformer().to(DEVICE)
+    elif model_name == "LSTM":
+        return LSTM().to(DEVICE)
+    elif model_name == "MCLDNN":
+        return MCLDNN().to(DEVICE)
+    elif model_name == "Transformer":
+        return Transformer().to(DEVICE)
+    elif model_name == "ICAMC":
+        return ICAMC().to(DEVICE)
     else:
         raise ValueError(f"Unknown classifier model: {model_name}")
 
@@ -224,7 +231,7 @@ def train_finetune(model_cls, model_fm, dataloader, checkpoint_dir):
                 desc="Finetuning Classifier", unit="batch")
 
     # FM 推理步数
-    FM_STEPS = 100
+    FM_STEPS = 10
 
     for i, (noisy_sig, label, snr) in pbar:
         noisy_sig = noisy_sig.to(DEVICE)
@@ -251,7 +258,7 @@ def train_finetune(model_cls, model_fm, dataloader, checkpoint_dir):
 
             # --- Batched Euler ODE Solver ---
             # 计算每个样本的时间步长 dt = (1.0 - t_start) / steps
-            dt = (0.8 - t_start) / FM_STEPS
+            dt = (0.75 - t_start) / FM_STEPS
             dt = dt.view(-1, 1, 1)  # (B, 1, 1) 用于广播
 
             t_curr = t_start.clone()  # (B,)
