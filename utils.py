@@ -8,6 +8,98 @@ from tqdm import tqdm
 from models import GRU, GRUformer, LSTM, MCLDNN, Transformer, ICAMC
 
 
+def train_reflow(student_model, teacher_model, checkpoint_dir):
+    """
+    Reflow 训练 (2-Rectified Flow) - Online Generation
+    student_model: 正在训练的模型 (2-RF)
+    teacher_model: 预训练好的 1-RF 模型 (用于生成目标数据)
+    """
+    student_model.train()
+    teacher_model.eval()  # 老师模型不训练
+
+    optimizer = optim.Adam(student_model.parameters(),
+                           lr=CONFIG["learning_rate"])
+    criterion = nn.MSELoss()
+
+    total_samples_processed = 0
+    running_loss = 0.0
+
+    target_samples = CONFIG["reflow_num_samples"]
+    # 计算需要多少次迭代
+    batch_size = CONFIG["reflow_batch_size"]
+    num_iterations = int(target_samples // batch_size) + 1
+
+    log_interval = max(1, num_iterations // CONFIG["times_log"])
+    save_interval = int(target_samples / CONFIG["times_save"])
+
+    pbar = tqdm(range(num_iterations),
+                desc="Reflow Training (Online)", unit="batch")
+
+    for i in pbar:
+        # A. 在线生成数据
+        # 1. 采样噪声 Z (起始点)
+        z = torch.randn(batch_size, 2, CONFIG["signal_length"]).to(
+            DEVICE) / 1.41421
+        B = z.shape[0]
+
+        # 2. 使用 Teacher Model (1-RF) 演化 Z -> X1_pred
+        with torch.no_grad():
+            x1_pred = teacher_model.predict_x1(
+                z, t_start=CONFIG["reflow_t_start"], steps=20, method='euler', target_t=CONFIG["reflow_t_end"])
+
+        # B. 训练 Student Model
+        # 构造直线路径 X_t = (1-t)Z + tX1_pred
+        # 目标 V = X1_pred - Z
+
+        # 采样时间 t
+        t = torch.rand(B, device=DEVICE)
+
+        t_reshaped = t.view(-1, 1, 1)
+        xt = (1 - t_reshaped) * z + t_reshaped * x1_pred
+
+        target_v = x1_pred - z
+
+        # 模型预测
+        pred_v = student_model(xt, t)
+
+        loss = criterion(pred_v, target_v)
+
+        optimizer.zero_grad()
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(
+            student_model.parameters(), max_norm=1.0)
+        optimizer.step()
+
+        # Logging
+        loss_val = loss.item()
+        running_loss += loss_val
+        total_samples_processed += B
+
+        pbar.set_postfix({"loss": f"{loss_val:.6f}"})
+
+        if (i + 1) % log_interval == 0:
+            avg_loss = running_loss / log_interval
+            logging.info(
+                f"Batch {i+1} | Samples {total_samples_processed} | Loss: {avg_loss:.6f}")
+            running_loss = 0.0
+
+        if total_samples_processed >= target_samples:
+            break
+
+        # Checkpointing
+        prev_count = total_samples_processed - B
+        curr_count = total_samples_processed
+        if (prev_count // save_interval) != (curr_count // save_interval):
+            save_path = os.path.join(
+                checkpoint_dir, f"reflow_model_{total_samples_processed}.pth")
+            torch.save(student_model.state_dict(), save_path)
+            logging.info(f"Reflow checkpoint saved to {save_path}")
+
+    save_path = os.path.join(checkpoint_dir, f"reflow_model_final.pth")
+    torch.save(student_model.state_dict(), save_path)
+    logging.info("Reflow training finished.")
+
+
 def get_classifier_model(model_name=CONFIG["classifier_model"]):
     if model_name == "GRU":
         return GRU().to(DEVICE)
@@ -142,6 +234,7 @@ def train_classifi(model, dataloader, checkpoint_dir):
     save_interval = int(
         CONFIG["classifier_num_samples"] / CONFIG["times_save"])
     # 使用 tqdm 包装 dataloader
+
     def cycle(iterable):
         while True:
             for x in iterable:
@@ -218,7 +311,8 @@ def train_classifi(model, dataloader, checkpoint_dir):
 def train_finetune(model_cls, model_fm, dataloader, checkpoint_dir):
     model_cls.train()
     model_fm.eval()  # Flow Matching 模型保持评估模式
-    optimizer = optim.Adam(model_cls.parameters(), lr=CONFIG["learning_rate"]/5)
+    optimizer = optim.Adam(model_cls.parameters(),
+                           lr=CONFIG["learning_rate"]/5)
     criterion = nn.CrossEntropyLoss()
 
     total_samples_processed = 0

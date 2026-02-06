@@ -7,7 +7,7 @@ import os
 from config import CONFIG, DEVICE
 from signal_gen import RFSignalDataset
 from fm_models import RFSignalDiT
-from utils import get_classifier_model, train_fm, train_classifi, train_finetune
+from utils import get_classifier_model, train_fm, train_classifi, train_finetune, train_reflow
 from models import *
 import argparse
 
@@ -20,8 +20,11 @@ def main():
                         help="Train Classifier model (Default: False)")
     parser.add_argument("-t", action="store_true", default=False,
                         help="Finetune Classifier model (Default: False)")
+    parser.add_argument("-tr", action="store_true", default=False,
+                        help="Train Reflow model (2-Rectified Flow)")
+
     args = parser.parse_args()
-    assert args.f or args.c or args.t, "At least one of -f (Flow Matching), -c (Classifier), or -t (Finetune) must be specified."
+    assert args.f or args.c or args.t or args.tr, "At least one action must be specified."
 
     # 配置 logging
     logging.basicConfig(
@@ -35,7 +38,7 @@ def main():
     )
     logging.info("="*30)
     logging.info(
-        f"Starting main process... Arguments: FM={args.f}, CLS={args.c}, FT={args.t}")
+        f"Starting main process... Arguments: FM={args.f}, CLS={args.c}, FT={args.t}, TrainReflow={args.tr}")
 
     # 创建带有时间戳的检查点目录，防止覆盖
     timestamp = datetime.now().strftime("%m-%d--%H-%M")
@@ -43,6 +46,34 @@ def main():
     os.makedirs(run_checkpoint_dir, exist_ok=True)
     logging.info(
         f"Checkpoints for this run will be saved to: {run_checkpoint_dir}")
+
+    if args.tr:
+        logging.info(">>> Start Online Reflow Training (2-Rectified Flow)")
+        assert CONFIG['fm_model_path'], "Must provide 'fm_model_path' (Teacher 1-RF Checkpoint) in config for Reflow Training."
+
+        # 1. Load Teacher Model (1-RF)
+        teacher_model = RFSignalDiT().to(DEVICE)
+        teacher_model.load_state_dict(torch.load(
+            CONFIG['fm_model_path'], map_location=DEVICE))
+        teacher_model.eval()  # Ensure eval mode
+        logging.info(
+            f"Loaded Teacher 1-RF model (for target generation) from {CONFIG['fm_model_path']}")
+
+        # 2. Initialize Student Model (2-RF)
+        student_model = RFSignalDiT().to(DEVICE)
+
+        # 可选：加载 1-RF 权重作为学生模型的初始化，加速收敛
+        try:
+            student_model.load_state_dict(torch.load(
+                CONFIG['fm_model_path'], map_location=DEVICE))
+            logging.info(
+                f"Initialized Student Reflow model with weights from {CONFIG['fm_model_path']}")
+        except:
+            logging.warning(
+                "Could not load weights for Reflow Student init, starting from scratch. (This is fine, just slower)")
+
+        # 3. Start Online Reflow Training
+        train_reflow(student_model, teacher_model, run_checkpoint_dir)
 
     if args.f:
         logging.info(">>> Start Training Flow Matching Model")

@@ -14,7 +14,8 @@ CONFIG = {
     "num_samples_finetune": 3e5,
     "finetune_snr_range": (-5, 5),
     # Classifier training hyperparameters
-    "classifier_model": "GRUformer",  # 可选: "GRU", "GRUformer","LSTM",  "MCLDNN", "Transformer","ICAMC"
+    # 可选: "GRU", "GRUformer","LSTM",  "MCLDNN", "Transformer","ICAMC"
+    "classifier_model": "GRUformer",
     "classifier_num_samples": 8e6,  # 分类训练总样本数量
     "samples_per_epoch": 5e5,  # 定义每个 Epoch 的样本数量 (用于控制数据集重置频率)
     "classifier_snr_range": (-10, 20),  # 分类器训练时的 SNR 范围 (dB)
@@ -34,5 +35,9 @@ CONFIG = {
     "num_heads": 8,
     "num_classes": 14,  #
 
-
+    # Reflow hyperparameters
+    "reflow_num_samples": 1e4,   # Reflow 数据集大小
+    "reflow_batch_size": 64*8,
+    "reflow_t_start": 0.001,      # 采样起点
+    "reflow_t_end": 0.999,        # 采样终点
 }

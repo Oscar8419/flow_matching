@@ -29,7 +29,7 @@ class DiTBlock1D(nn.Module):
         self.norm1 = nn.LayerNorm(
             hidden_size, eps=1e-6, elementwise_affine=False)
         self.attn = nn.MultiheadAttention(
-            hidden_size, num_heads, dropout=0.1,batch_first=True)
+            hidden_size, num_heads, dropout=0.1, batch_first=True)
         self.norm2 = nn.LayerNorm(
             hidden_size, eps=1e-6, elementwise_affine=False)
         self.mlp = nn.Sequential(
@@ -169,7 +169,7 @@ class RFSignalDiT(nn.Module):
         return output
 
     @torch.no_grad()
-    def predict_x1(self, xt, t_start, steps=50, method='euler'):
+    def predict_x1(self, xt, t_start, steps=50, method='euler', target_t=1.0):
         """
         使用欧拉法 (Euler Method) 或中点法 (Midpoint Method) 从当前时刻 t_start 逐步推演。
         """
@@ -183,15 +183,16 @@ class RFSignalDiT(nn.Module):
         # 如果 batch 内 t_start 不同，则需要更复杂的 mask 处理，这里简化假设一致。
         t_scalar = t_curr[0].item()
 
-        if t_scalar >= 1.0:
+        if t_scalar >= target_t:
             return xt
 
-        target_t = 0.75
+        # target_t = 0.75  # Removed hardcoded value
         dt = (target_t - t_scalar) / steps
         current_x = xt.clone()
 
         # 生成时间步 (t_start -> ... -> target_t)
-        time_grid = torch.linspace(t_scalar, target_t, steps + 1, device=xt.device)
+        time_grid = torch.linspace(
+            t_scalar, target_t, steps + 1, device=xt.device)
 
         for i in range(steps):
             # 当前时间 t
@@ -208,18 +209,19 @@ class RFSignalDiT(nn.Module):
             elif method == 'midpoint':
                 # 1. 预测当前点速度 v1
                 v1 = self.forward(current_x, t_batch)
-                
+
                 # 2. 预测中点状态
                 x_mid = current_x + v1 * dt / 2
                 t_mid = t_now + dt / 2
-                t_mid_batch = torch.full((xt.shape[0],), t_mid, device=xt.device)
-                
+                t_mid_batch = torch.full(
+                    (xt.shape[0],), t_mid, device=xt.device)
+
                 # 3. 预测中点速度 v2
                 v2 = self.forward(x_mid, t_mid_batch)
-                
+
                 # 4. 中点法更新
                 current_x = current_x + v2 * dt
-            
+
             else:
                 raise ValueError(f"Unknown sampling method: {method}")
 
