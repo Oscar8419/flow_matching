@@ -6,12 +6,14 @@ from config import CONFIG
 
 class GRU(nn.Module):
     def __init__(self,
+                 input_size=8,
                  hidden_size=256,
                  num_classes=CONFIG["num_classes"]):
         super().__init__()
+        self.input_size = input_size
         # Single layer unidirectional GRU
         self.gru1 = nn.GRU(
-            input_size=2,
+            input_size=input_size,
             hidden_size=hidden_size,
             num_layers=1,
             batch_first=True,
@@ -33,6 +35,9 @@ class GRU(nn.Module):
         x: (Batch, 2, Signal_Length)
         """
         x = x.permute(0, 2, 1)  # (B, L, 2)
+        batch_size = x.size(0)
+        x = x.reshape(batch_size, -1, self.input_size//2, 2)\
+            .transpose(-2, -1).contiguous().reshape(batch_size, -1, self.input_size)
 
 
         # 2. GRU Forward
@@ -51,12 +56,14 @@ class GRU(nn.Module):
 
 class LSTM(nn.Module):
     def __init__(self,
+                 input_size=8,
                  hidden_size=256,
                  num_classes=CONFIG["num_classes"]):
         super().__init__()
         # Single layer unidirectional LSTM
+        self.input_size = input_size
         self.lstm1 = nn.LSTM(
-            input_size=2,
+            input_size=input_size,
             hidden_size=hidden_size,
             num_layers=1,
             batch_first=True,
@@ -78,7 +85,9 @@ class LSTM(nn.Module):
         x: (Batch, 2, Signal_Length)
         """
         x = x.permute(0, 2, 1)  # (B, L, 2)
-
+        batch_size = x.size(0)
+        x = x.reshape(batch_size, -1, self.input_size//2, 2)\
+            .transpose(-2, -1).contiguous().reshape(batch_size, -1, self.input_size)
 
         # 2. LSTM Forward
         # output shape: (Batch, Seq_Len, Hidden_Size)
