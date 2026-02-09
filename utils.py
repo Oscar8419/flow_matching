@@ -6,6 +6,42 @@ from config import CONFIG, DEVICE
 import logging
 from tqdm import tqdm
 from models import GRU, GRUformer, LSTM, MCLDNN, Transformer, ICAMC
+from signal_gen import RFSignalDataset
+from torch.utils.data import DataLoader
+import numpy as np
+
+
+def add_awgn(sig, snr_db):
+    """
+    在信号上添加指定 SNR 的高斯白噪声，并重新归一化功率
+    sig: (B, 2, L)
+    snr_db: scalar or (B,)
+    """
+    # 假设输入信号 sig 已经功率归一化 (Ps = 1)
+    # SNR = 10 * log10(Ps / Pn)  =>  Pn = Ps / 10^(SNR/10)
+
+    # Handle scalar snr_db
+    if isinstance(snr_db, (float, int)):
+        power_noise = 1.0 / (10**(snr_db / 10.0))
+        noise_std = np.sqrt(power_noise / 2.0)
+        # noise_std is scalar
+        noise = torch.randn_like(sig) * noise_std
+    else:
+        # Assuming snr_db is a tensor (B,)
+        power_noise = 1.0 / (10**(snr_db / 10.0))  # (B,)
+        noise_std = torch.sqrt(power_noise / 2.0).view(-1, 1, 1)
+        noise = torch.randn_like(sig) * noise_std
+
+    noisy_sig = sig + noise
+
+    # 重新归一化功率
+    energy = torch.sum(noisy_sig**2, dim=(1, 2), keepdim=True)
+    length = noisy_sig.shape[2]  # L
+    power_noisy = energy / length
+
+    noisy_sig = noisy_sig / torch.sqrt(power_noisy + 1e-8)
+
+    return noisy_sig
 
 
 def train_reflow(student_model, teacher_model, checkpoint_dir):
@@ -32,35 +68,82 @@ def train_reflow(student_model, teacher_model, checkpoint_dir):
     log_interval = max(1, num_iterations // CONFIG["times_log"])
     save_interval = int(target_samples / CONFIG["times_save"])
 
-    pbar = tqdm(range(num_iterations),
+    # 初始化数据集，用于生成不同 SNR 的 Noisy Signal
+    # 改为 snr_range=None (Clean Signal)，并在 batch 级别统一加噪
+    dataset_reflow = RFSignalDataset(
+        num_samples=target_samples,
+        signal_len=CONFIG["signal_length"],
+        snr_range=None,  # Return Clean Signal
+        seed=123456
+    )
+    dataloader_reflow = DataLoader(
+        dataset_reflow,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=CONFIG["num_workers"]
+    )
+
+    pbar = tqdm(enumerate(dataloader_reflow), total=num_iterations,
                 desc="Reflow Training (Online)", unit="batch")
 
-    for i in pbar:
+    for i, (clean_sig, _, _) in pbar:
         # A. 在线生成数据
-        # 1. 采样噪声 Z (起始点)
-        z = torch.randn(batch_size, 2, CONFIG["signal_length"]).to(
-            DEVICE) / 1.41421
-        B = z.shape[0]
+        # 1. 获取 Clean Signal 并添加统一 SNR 的噪声
+        clean_sig = clean_sig.to(DEVICE)
+        B = clean_sig.shape[0]
 
-        # 2. 使用 Teacher Model (1-RF) 演化 Z -> X1_pred
+        # 为当前 Batch 随机选择一个统一的 SNR
+        cur_snr = np.random.uniform(-10, 5)
+
+        # 添加噪声得到 x_T (Noisy Signal)
+        x_T = add_awgn(clean_sig, cur_snr)
+
+        # 计算起始时间 t_start (根据 SNR)
+        # 对应 eval_model.ipynb 中的 snr2t 逻辑
+        # R = 10^(snr / 20) -> t = R / (1+R)
+        R = 10 ** (cur_snr / 20.0)
+        t_start = R / (1 + R)
+
+        # 归一化输入到模型的尺度: xt = z * scale
+        # scale = sqrt((1-t)^2 + t^2)
+        scale_factor = torch.sqrt(torch.tensor(
+            (1 - t_start)**2 + t_start**2, device=DEVICE)).view(-1, 1, 1)
+        x_T_scaled = x_T * scale_factor
+
+        # 2. 使用 Teacher Model (1-RF) 演化 x_T -> X1_pred
+        # 此时 t_start 对整个 batch 是一致的，可以直接传入 predict_x1
         with torch.no_grad():
+            # Teacher 从当前 Noisy Signal (对应 t_start) 演化到 t=target (比如 0.999)
             x1_pred = teacher_model.predict_x1(
-                z, t_start=CONFIG["reflow_t_start"], steps=20, method='euler', target_t=CONFIG["reflow_t_end"])
+                x_T_scaled, t_start=t_start, steps=30, method='euler', target_t=CONFIG["reflow_t_end"])
 
         # B. 训练 Student Model
-        # 构造直线路径 X_t = (1-t)Z + tX1_pred
-        # 目标 V = X1_pred - Z
+        # Reflow 的核心: 学习连接 (x_T, t_start) 和 (X1_pred, t_end) 的直线路径
 
-        # 采样时间 t
-        t = torch.rand(B, device=DEVICE)
+        # 采样插值系数 u ~ U[0, 1]
+        u = torch.rand(B, device=DEVICE)
+
+        # 当前实际时间 t
+        t_end = CONFIG["reflow_t_end"]
+        t = t_start + u * (t_end - t_start)  # t is scalar per sample
 
         t_reshaped = t.view(-1, 1, 1)
-        xt = (1 - t_reshaped) * z + t_reshaped * x1_pred
 
-        target_v = x1_pred - z
+        # 目标速度 V
+        # User defined logic: target_v = x_1 - x_0 = x_1 - (x_T - T * x_1) / (1-T)
+        # Using x_T and T to infer x_0
+        x_0_est = (x_T_scaled - t_start * x1_pred) / (1 - t_start)
+        target_v = x1_pred - x_0_est
+
+        # 构造轨迹上的点 Xt
+        # Xt = x_T + v * (t - T)
+        # mid_xt = x_T + target_v * (t - t_start)
+        # t is (B,), t_start is scalar. We need shapes to match (B, 1, 1) to broadcast with (B, 2, L)
+        dt = t_reshaped - t_start
+        mid_xt = x_T_scaled + target_v * dt
 
         # 模型预测
-        pred_v = student_model(xt, t)
+        pred_v = student_model(mid_xt, t)
 
         loss = criterion(pred_v, target_v)
 

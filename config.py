@@ -36,8 +36,8 @@ CONFIG = {
     "num_classes": 14,  #
 
     # Reflow hyperparameters
-    "reflow_num_samples": 1e4,   # Reflow 数据集大小
-    "reflow_batch_size": 64*8,
+    "reflow_num_samples": 3e4,   # Reflow 数据集大小
+    "reflow_batch_size": 64*2,
     "reflow_t_start": 0.001,      # 采样起点
-    "reflow_t_end": 0.999,        # 采样终点
+    "reflow_t_end": 0.8,        # 采样终点
 }
