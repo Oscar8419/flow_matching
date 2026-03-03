@@ -37,7 +37,16 @@ CONFIG = {
 
     # Reflow hyperparameters
     "reflow_num_samples": 3e4,   # Reflow 数据集大小
-    "reflow_batch_size": 64*2,
-    "reflow_t_start": 0.001,      # 采样起点
+    "reflow_batch_size": 64*1,
     "reflow_t_end": 0.8,        # 采样终点
+}
+
+PATH = {
+    'reflow_model': '/root/code/flow_matching/checkpoints/02-09--19-49/reflow_model_final.pth',
+    'GRUformer': '/root/code/flow_matching/checkpoints/01-27--22-29/classifier_final.pth',
+    'GRU': '/root/code/flow_matching/checkpoints/01-28--14-08/classifier_final.pth',
+    'MCLDNN': '/root/code/flow_matching/checkpoints/01-28--14-44/classifier_final.pth',
+    'Transformer': '/root/code/flow_matching/checkpoints/01-28--15-02/classifier_final.pth',
+    'LSTM': '/root/code/flow_matching/checkpoints/01-28--15-41/classifier_final.pth',
+    'ICAMC': '/root/code/flow_matching/checkpoints/01-28--15-56/classifier_final.pth',
 }
